@@ -18,3 +18,4 @@ $post_status = implode("','", array('confirmed', 'pending-confirmation') );
 $pageposts = $wpdb->get_results($querystr, OBJECT);
 echo "<pre>";
 print_r($pageposts);
+echo "</pre>";
