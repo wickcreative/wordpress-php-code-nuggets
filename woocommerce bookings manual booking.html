@@ -1,0 +1,333 @@
+<?php
+// as an intro note, we have an ultra weird booking logic setup on this site, so if some of these skill types and such seem weird/unnecessary, they most likely are for you.
+
+    //////////////////////////////////////////////////////////////////////////
+   // Ok just as a starter we will be allowing the staff to do these       //
+  // booking from a gravity form, so you will need to create one.         // 
+ // to see what our form looked like go here - http://imgur.com/pjgX2oX  //
+//////////////////////////////////////////////////////////////////////////
+ 
+ // Here we grab the aformentioned gravity form 
+add_action( 'gform_after_submission_24', 'manual_booking', 10, 2 );
+function manual_booking( $entry, $form ) {
+	// Hi there, get comfortable, this might get bumpy.
+
+  ///////////////////////////////////////////////////////////////////////
+ // First see if we need to create a user or get a users existing ID  //
+///////////////////////////////////////////////////////////////////////
+
+  $email = rgar( $entry, '1' );
+  $exists = email_exists($email);
+  if ( $exists ) {
+  	$user = get_user_by('email', $email);
+	$user_id = $user->ID;
+	$firstname = $user->first_name;
+	$lastname = $user->last_name;
+  }
+  else	{
+	
+  //////////////////////////
+ // Create the New User  //
+//////////////////////////
+		 
+		// Generate the password and get user variables
+		$password = wp_generate_password( 12, false );
+		$useremail = rgar( $entry, '1' );
+		$firstname = rgar( $entry, '2.3' );
+		$lastname = rgar( $entry, '2.6' );
+		$studentname = rgar( $entry, '2' );
+		$studenttype = rgar( $entry, '6' );
+		$agegroup = rgar( $entry, '5' );
+		$skilllevel = rgar( $entry, '7' );
+		
+		
+		//create the user
+		$user_id = wp_create_user( $useremail, $password, $useremail );
+		
+		// Let's add the Student info now
+		wp_update_user(array('ID' => $user_id, 'first_name' => $firstname, 'role' => 'customer', 'Last_name' => $lastname));
+        add_user_meta($user_id, 'student_name', $studentname);
+		add_user_meta($user_id, 'student_type', $studenttype);
+		add_user_meta($user_id, 'age_group', $agegroup);
+		add_user_meta($user_id, 'skill_level', $skilllevel);
+		add_user_meta($user_id, 'waiver_completed', 'No');
+		add_user_meta($user_id, 'first_name', $firstname);
+		add_user_meta($user_id, 'last_name', $lastname);
+		add_user_meta($user_id, 'billing_first_name', $firstname);
+		add_user_meta($user_id, 'billing_last_name', $lastname);
+		// this is unnecessary, but the fields were being pesky so I doubled down by adding and updating in case one already existed
+		update_user_meta($user_id, 'student_name', $studentname);
+		update_user_meta($user_id, 'student_type', $studenttype);
+		update_user_meta($user_id, 'age_group', $agegroup);
+		update_user_meta($user_id, 'skill_level', $skilllevel);
+		update_user_meta($user_id, 'waiver_completed', 'No');
+		update_user_meta($user_id, 'first_name', $firstname);
+		update_user_meta($user_id, 'last_name', $lastname);
+		
+  		
+  		//$user = new WP_User( $user_id );
+		$emailbody = 'Hi, we have created a booking request for you at Snobahn.com.<br/>Please know that this does not mean that your booking is confirmed. You will get an email to confirm your booking when your time slot meets the required students. You will then be able to pay for your booking.<br/><h2>Fill out Your Waiver</h2><br/> You can now login and fill out your waiver - <a href="https://snobahn.com/waiver-add-on/">Fill Out Your Waiver</a><br/><strong>To do so you will need to login to your new account first</strong><br/>Your Login: ' .$useremail. '<br/>Your Password: ' .$password. '<br/><br/>Thank you for requesting your booking with Snobahn! We look forward to seeing you on the slopes.<br/>If you have additional questions feel free to call us at (303) 872-8494. <br/><br/>Thanks,<br/>The Snobahn Team'; 
+
+  		// Email the user
+  		wp_mail( $useremail, 'Welcome to Snobahn! Your account has been created.', $emailbody );
+
+// let's go ahead and end the earlier else from the first step
+  }
+	
+  ///////////////////////////
+ // Date & Time Gathering //
+///////////////////////////
+
+$date = rgar( $entry, 'date_created' );
+
+
+  /////////////////////////////////////
+ // Create the Order in WooCommerce //
+/////////////////////////////////////
+
+
+	$shop_order_args = array(
+    	'comment_status' => 'open', 
+    	'ping_status' => 'closed',
+    	'post_author' => 43, 
+	    'post_title' => 'Manual Booking on' .$date,
+		'post_date' => $date,
+		'post_date_gmt' => $date,                                   
+   		'post_status' => 'wc-pending', 
+    	'post_type' => 'shop_order'                                 
+	);
+
+		// add the order post
+		$order_id = wp_insert_post( $shop_order_args );
+
+		// build meta values
+		$shop_order_meta_values = array(
+    		'_customer_user' 		=> $user_id,
+    		'_billing_email' 		=> $useremail,
+			'_payment_method'		=> 'wc-booking-gateway',
+			'_payment_method_title'	=> 'Check booking availability',
+			'_booking_order'		=> '1',
+			'_billing_first_name'	=> $firstname,
+			'_shipping_first_name'	=> $firstname,
+			'_billing_last_name'	=> $lastname,
+			'_shipping_last_name'	=> $lastname
+			);
+	
+		// let's get those meta's added
+		if($order_id > 0){
+    		foreach($shop_order_meta_values as $key => $value) {
+        		update_post_meta($order_id, $key, $value);
+    			}
+	}
+
+  ////////////////////////////////////////
+ // Attach the Order items WooCommerce //
+////////////////////////////////////////
+	 
+	 
+		// add order items
+		$orderitem_id = wc_add_order_item( $order_id, array(
+		'order_item_name' => 'Book A Lesson',
+		'order_item_type' => 'line_item'
+		));
+		
+		
+  ////////////////////////
+ // Create the booking //
+////////////////////////
+
+
+	$wc_booking_args = array(
+    	'comment_status' => 'closed',
+    	'ping_status' => 'closed',
+    	'post_author' => $user_id,
+	    'post_title' => 'Booking -' .$date,
+		'post_date' => $date,
+		'post_date_gmt' => $date,                                   
+   		'post_status' => 'pending-confirmation', 
+    	'post_type' => 'wc_booking', 
+		'post_name' => 'booking-' .$date,
+		'post_parent' =>  $order_id                                
+	);
+
+		// add the posts
+		$booking_id = wp_insert_post( $wc_booking_args );
+
+		// gather the variables & format the time correctly
+		$date = rgar( $entry, '3' );
+		$serverdate = date('Ymd', strtotime($date));
+		$time = rgar( $entry, '4' );
+		$timetoday = strtotime('today');
+		$timetoday = date('Y-m-d H:i:s', $timetoday);
+		$time = date('His', strtotime($timetoday .' +'. $time .' seconds'));
+		$starttime = $serverdate .$time;
+		$timestamp = strtotime($time) + 60*20;
+		$endmins = date('His', $timestamp);
+		$endtime = $serverdate .$endmins;
+
+		$size = rgar( $entry, '11' );
+  		if ( $size == 'Indiviidual|35' ) {
+			$persons = array( 1509 => 1);
+  		} elseif ( $size == 'Individual|40' )	{
+			$persons = array( 516 => 1);
+		} elseif ( $size == 'Private|105' )	{
+			$persons = array( 1506 => 3);
+		} elseif ( $size == 'Private|75' )	{
+			$persons = array( 1510 => 3);
+		}
+
+		// build meta values array
+		$wc_booking_meta_values = array(
+    		'_booking_order_item_id' 		=> $orderitem_id, 
+			'_booking_product_id' 		=> '515',
+			'_booking_persons' 		=> $persons, 
+			'_booking_cost' 		=>  rgar( $entry, '15' ), 
+			'_booking_start' 		=> $starttime, 
+			'_booking_end' 		=> $endtime, //
+			'_booking_all_day' 		=> '0',
+			'_booking_parent_id' 		=> '0',
+			'_booking_customer_id' 		=> $user_id
+
+		);
+	
+		// let's get those meta's added
+		if($booking_id > 0){
+    		foreach($wc_booking_meta_values as $key => $value) {
+        		// add our post meta
+        		update_post_meta($booking_id, $key, $value);
+    		}
+		}		
+
+		
+  /////////////////////////////////////////////////////////
+ // Coupon / Class Pass Used & Building the Order Total //
+/////////////////////////////////////////////////////////
+
+
+	// some variables we need	
+	$wctype = rgar( $entry, '6' );
+	$wcage = rgar( $entry, '5' );
+	$wcskill = rgar( $entry, '7' );
+	if($wcskill == 'Intro Class - Skill Not Set') {
+		$wcskill = 'Beginner';
+	}
+	$wcsession = rgar( $entry, '11' );
+	list($a, $b) = explode('|',$wcsession);
+	$wcsession = $a;
+	$wcbooking = rgar( $entry, '3' );
+	$wcbooking = date('F j, Y', strtotime($wcbooking));
+	
+	$wctime = rgar( $entry, '4' );
+	$wctimestamp = strtotime('today');
+	$wctimestamp_date = date('Y-m-d H:i:s', $wctimestamp);
+	$wctime = date('g:i a', strtotime($wctimestamp_date .' +'. $wctime .' seconds'));
+
+	$wctotal = rgar( $entry, '15' );
+	if ( strpos($size, 'Individual' ) !== false) {
+		$wcpersonstype = 'Persons - '.$wcage;
+  		$wcpersons = '1';
+  	}
+  	else	{
+		$wcpersonstype = 'Private - '.$wcage;
+		$wcpersons = '3';
+	}
+	$coupon = rgar( $entry, '10' );
+	$coupon2 = rgar( $entry, '14' );
+	$couponcheck = new WC_Coupon($coupon2);
+	
+	if ( $coupon === 'yes') {
+        // add the coupon 
+		$coupon_id = wc_add_order_item( $order_id, array(
+            'order_item_name'       => 'intro class 25% off', 
+        	'order_item_type'       => 'coupon'
+        ));
+		// update the total to incorporate the discount	price
+		$coupon_value = (10/100)*$wctotal;
+		$wclineitemtotal = $wctotal - $coupon_value;
+		$wcdiscountvalue = $coupon_value;
+		update_post_meta($order_id, '_order_total', $wctotal - $wcdiscountvalue);
+		// creating coupons posts
+		wc_add_order_item_meta( $coupon_id, 'discount_amount', $wcdiscountvalue );
+		wc_add_order_item_meta( $coupon_id, 'discount_amount_tax', '0' );
+		update_post_meta($order_id, '_cart_discount', $wcdiscountvalue);
+		update_post_meta($order_id, '_cart_discount_tax', '0');
+	}
+		// check if coupon valid
+	elseif ( $couponcheck->id && isset( $couponcheck->id )) {
+		$coupon_id = wc_add_order_item( $order_id, array(
+            'order_item_name'       => $coupon2, 
+        	'order_item_type'       => 'coupon'
+        ));
+		if (strpos($couponcheck->coupon_amount, '%') !== false) {
+			$value = str_replace('%', '', $couponcheck->coupon_amount);
+			$coupon2_value = ($value/100)*$wctotal;
+		} else {
+			$coupon2_value = $couponcheck->coupon_amount;
+		}
+		// need to make sure that there are checks in place for usage, user-restriction, expiration, etc
+		// update the total to incorporate the discount	price
+		if($coupon2_value > $wctotal) {
+			$coupon2_value = $wctotal;
+		}
+		$wclineitemtotal = $wctotal - $coupon2_value;
+		$wcdiscountvalue = $coupon2_value;
+		update_post_meta($order_id, '_order_total', $wctotal - $wcdiscountvalue);	
+		// creating coupons posts
+		wc_add_order_item_meta( $coupon_id, 'discount_amount', $wcdiscountvalue );
+		wc_add_order_item_meta( $coupon_id, 'discount_amount_tax', '0' );
+		update_post_meta($order_id, '_cart_discount', $wcdiscountvalue);
+		update_post_meta($order_id, '_cart_discount_tax', '0');
+	}
+	else {
+		// this builds the total if no coupon was added
+		$wclineitemtotal = $wctotal;
+		update_post_meta($order_id, '_order_total', $wctotal);
+		$wcdiscountvalue = 0;
+	}
+			
+	
+  //////////////////////////////////////////////////
+ // Attach the student details to the order item //
+//////////////////////////////////////////////////
+
+		
+		// add order item metas in a super manual way
+		
+		wc_add_order_item_meta( $orderitem_id, 'Select a session', $wcsession );
+		wc_add_order_item_meta( $orderitem_id, 'Student / Group Type', $wctype );
+		wc_add_order_item_meta( $orderitem_id, 'Age Group', $wcage );
+		wc_add_order_item_meta( $orderitem_id, 'Skill Level', $wcskill );
+		// wc_add_order_item_meta( $orderitem_id, 'Class Group', $type. ' ' .$age. ' ' .$skill );
+		wc_add_order_item_meta( $orderitem_id, 'Booking Date', $wcbooking );
+		wc_add_order_item_meta( $orderitem_id, 'Booking Time', $wctime );
+		wc_add_order_item_meta( $orderitem_id, $wcpersonstype, $wcpersons );
+		wc_add_order_item_meta( $orderitem_id, 'Booking ID', $booking_id );
+		wc_add_order_item_meta( $orderitem_id, '_qty', '1' );
+		wc_add_order_item_meta( $orderitem_id, '_product_id', '515' );
+		wc_add_order_item_meta( $orderitem_id, '_line_subtotal', $wctotal );
+		wc_add_order_item_meta( $orderitem_id, '_line_total', $wclineitemtotal );
+
+	// A couple last things - let's run the approval function from functions.php, and send some emails for good measure
+	auto_approve_booking($booking_id);
+	
+	$mailer = WC()->mailer();
+    $mails = $mailer->get_emails();
+
+    if ( ! empty( $mails ) ) {
+    	foreach ( $mails as $mail ) {
+        	if ( $mail->id == 'booking_notification' ) {
+            	$mail->trigger($booking_id, 'Your Pending Booking');
+        	}
+			if ( $mail->id == 'customer_processing_order' ) {
+            	$mail->trigger($order_id);
+			}
+        }
+	}
+
+  ////////////////////////////////////////////
+ // Go take a nap, good work little buddy. //
+////////////////////////////////////////////
+}
+// function complete
+
+?>
